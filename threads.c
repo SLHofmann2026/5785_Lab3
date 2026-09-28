@@ -12,10 +12,19 @@
 #define SIDE_TASK_PRIORITY      ( tskIDLE_PRIORITY + 1UL )
 #define SIDE_TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 
+
+// Edited By:
+// Stephen Hofmann
+// Abed Mbarushimana
+
+// Date: SEPTEMBER 2026
+
+// variable declarations
 SemaphoreHandle_t semaphore;
 
 int counter;
 int on;
+
 
 void side_thread(void *params)
 {
@@ -43,11 +52,15 @@ int main(void)
     on = false;
     counter = 0;
     TaskHandle_t main, side;
-    semaphore = xSemaphoreCreateCounting(1, 1);
-    xTaskCreate(main_thread, "MainThread",
+    semaphore = xSemaphoreCreateCounting(1, 1);                                 // Semaphore definition
+
+    xTaskCreate(main_thread, "MainThread",                                      // Create main thread
                 MAIN_TASK_STACK_SIZE, NULL, MAIN_TASK_PRIORITY, &main);
-    xTaskCreate(side_thread, "SideThread",
+
+    xTaskCreate(side_thread, "SideThread",                                      // Create second thread
                 SIDE_TASK_STACK_SIZE, NULL, SIDE_TASK_PRIORITY, &side);
+
+                
     vTaskStartScheduler();
 	return 0;
 }

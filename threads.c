@@ -22,16 +22,20 @@
 // variable declarations
 SemaphoreHandle_t semaphore;
 
-int counter;
-int on;
+static int counter;
+static int on;
 
 
 void side_thread(void *params)
 {
 	while (1) {
         vTaskDelay(100);
+        xSemaphoreTake(semaphore, portMAX_DELAY);
+        {
         counter += 1;
-		printf("hello world from %s! Count %d\n", "thread", counter);
+		printf("hello world from %s! Count %d\n", "thread", counter); // reads counter could be inconsistent with main thread print
+        xSemaphoreGive(semaphore);
+        }
 	}
 }
 
@@ -40,7 +44,11 @@ void main_thread(void *params)
 	while (1) {
         cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, on);
         vTaskDelay(100);
-		printf("hello world from %s! Count %d\n", "main", counter++);
+        xSemaphoreTake(semaphore, portMAX_DELAY);
+        {
+		printf("hello world from %s! Count %d\n", "main", counter++); // counter here is incremented and can easily get out of sync with side thread
+        xSemaphoreGive(semaphore);
+        }
         on = !on;
 	}
 }
@@ -60,7 +68,7 @@ int main(void)
     xTaskCreate(side_thread, "SideThread",                                      // Create second thread
                 SIDE_TASK_STACK_SIZE, NULL, SIDE_TASK_PRIORITY, &side);
 
-                
+
     vTaskStartScheduler();
 	return 0;
 }

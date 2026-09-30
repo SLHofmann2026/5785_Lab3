@@ -7,113 +7,61 @@
 #define TASK_PRIORITY   (tskIDLE_PRIORITY + 1UL)
 #define TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 
-SemaphoreHandle_t lock1;
-SemaphoreHandle_t lock2;
+SemaphoreHandle_t lock;
 
-TaskHandle_t task1_handle;
-TaskHandle_t task2_handle;
+int counter = 0;
 
-/* Task 1 takes lock1 first, then waits for lock2. */
-void task1(void *params)
+/*
+ * Activity 5:
+ * This function intentionally contains an orphaned-lock bug.
+ * If skip_update is true, continue skips xSemaphoreGive().
+ */
+void worker_task(void *params)
 {
     while (1) {
-        xSemaphoreTake(lock1, portMAX_DELAY);
+        xSemaphoreTake(lock, portMAX_DELAY);
 
-        printf("Task 1 acquired lock 1\n");
+        if (counter == 3) {
+            printf("Skipping update at counter %d\n", counter);
 
-        vTaskDelay(pdMS_TO_TICKS(100));
+            /*
+             * BUG:
+             * The lock is not released before continue.
+             * The next iteration will wait forever for the same lock.
+             */
+            continue;
+        }
 
-        printf("Task 1 waiting for lock 2\n");
+        counter++;
 
-        xSemaphoreTake(lock2, portMAX_DELAY);
+        printf("Counter = %d\n", counter);
 
-        printf("Task 1 acquired lock 2\n");
+        xSemaphoreGive(lock);
 
-        xSemaphoreGive(lock2);
-        xSemaphoreGive(lock1);
-
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
-}
-
-/* Task 2 takes lock2 first, then waits for lock1. */
-void task2(void *params)
-{
-    while (1) {
-        xSemaphoreTake(lock2, portMAX_DELAY);
-
-        printf("Task 2 acquired lock 2\n");
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-
-        printf("Task 2 waiting for lock 1\n");
-
-        xSemaphoreTake(lock1, portMAX_DELAY);
-
-        printf("Task 2 acquired lock 1\n");
-
-        xSemaphoreGive(lock1);
-        xSemaphoreGive(lock2);
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-}
-
-void deadlock_test(void *params)
-{
-    /* Give the two tasks time to deadlock. */
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    /* Suspend both tasks before inspecting them. */
-    vTaskSuspend(task1_handle);
-    vTaskSuspend(task2_handle);
-
-    eTaskState state1 = eTaskGetState(task1_handle);
-    eTaskState state2 = eTaskGetState(task2_handle);
-
-    printf("Task 1 state after suspend: %d\n", state1);
-    printf("Task 2 state after suspend: %d\n", state2);
-    printf("Deadlock test complete\n");
-
-    /* Delete the deadlocked tasks. */
-    vTaskDelete(task1_handle);
-    vTaskDelete(task2_handle);
-
-    vTaskDelete(NULL);
 }
 
 int main(void)
 {
     stdio_init_all();
 
-    lock1 = xSemaphoreCreateMutex();
-    lock2 = xSemaphoreCreateMutex();
+    lock = xSemaphoreCreateMutex();
+
+    if (lock == NULL) {
+        printf("Failed to create mutex\n");
+        return 1;
+    }
+
+    TaskHandle_t worker_handle;
 
     xTaskCreate(
-        task1,
-        "Task1",
+        worker_task,
+        "Worker",
         TASK_STACK_SIZE,
         NULL,
         TASK_PRIORITY,
-        &task1_handle
-    );
-
-    xTaskCreate(
-        task2,
-        "Task2",
-        TASK_STACK_SIZE,
-        NULL,
-        TASK_PRIORITY,
-        &task2_handle
-    );
-
-    xTaskCreate(
-        deadlock_test,
-        "DeadlockTest",
-        TASK_STACK_SIZE,
-        NULL,
-        TASK_PRIORITY + 1,
-        NULL
+        &worker_handle
     );
 
     vTaskStartScheduler();

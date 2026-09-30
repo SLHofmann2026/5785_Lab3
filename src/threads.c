@@ -3,86 +3,117 @@
 #include <semphr.h>
 #include <task.h>
 #include <pico/stdlib.h>
-#include <pico/cyw43_arch.h>
 
-#define MAIN_TASK_PRIORITY      (tskIDLE_PRIORITY + 1UL)
-#define MAIN_TASK_STACK_SIZE    configMINIMAL_STACK_SIZE
-#define SIDE_TASK_PRIORITY      (tskIDLE_PRIORITY + 1UL)
-#define SIDE_TASK_STACK_SIZE    configMINIMAL_STACK_SIZE
+#define TASK_PRIORITY   (tskIDLE_PRIORITY + 1UL)
+#define TASK_STACK_SIZE configMINIMAL_STACK_SIZE
 
-SemaphoreHandle_t semaphore;
+SemaphoreHandle_t lock1;
+SemaphoreHandle_t lock2;
 
-int counter;
-int on;
+TaskHandle_t task1_handle;
+TaskHandle_t task2_handle;
 
-/* Functionality separated from the task loop */
-BaseType_t increment_counter(TickType_t timeout)
-{
-    BaseType_t lock_taken = xSemaphoreTake(semaphore, timeout);
-
-    if (lock_taken == pdTRUE) {
-        counter++;
-        xSemaphoreGive(semaphore);
-    }
-
-    return lock_taken;
-}
-
-void side_thread(void *params)
+/* Task 1 takes lock1 first, then waits for lock2. */
+void task1(void *params)
 {
     while (1) {
-        vTaskDelay(100);
+        xSemaphoreTake(lock1, portMAX_DELAY);
 
-        if (increment_counter(pdMS_TO_TICKS(50)) == pdTRUE) {
-            printf("hello world from thread! Count %d\n", counter);
-        }
+        printf("Task 1 acquired lock 1\n");
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        printf("Task 1 waiting for lock 2\n");
+
+        xSemaphoreTake(lock2, portMAX_DELAY);
+
+        printf("Task 1 acquired lock 2\n");
+
+        xSemaphoreGive(lock2);
+        xSemaphoreGive(lock1);
+
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
-void main_thread(void *params)
+/* Task 2 takes lock2 first, then waits for lock1. */
+void task2(void *params)
 {
     while (1) {
-        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, on);
-        vTaskDelay(100);
+        xSemaphoreTake(lock2, portMAX_DELAY);
 
-        if (increment_counter(pdMS_TO_TICKS(50)) == pdTRUE) {
-            printf("hello world from main! Count %d\n", counter);
-        }
+        printf("Task 2 acquired lock 2\n");
 
-        on = !on;
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        printf("Task 2 waiting for lock 1\n");
+
+        xSemaphoreTake(lock1, portMAX_DELAY);
+
+        printf("Task 2 acquired lock 1\n");
+
+        xSemaphoreGive(lock1);
+        xSemaphoreGive(lock2);
+
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
+}
+
+void deadlock_test(void *params)
+{
+    /* Give the two tasks time to deadlock. */
+    vTaskDelay(pdMS_TO_TICKS(1000));
+
+    /* Suspend both tasks before inspecting them. */
+    vTaskSuspend(task1_handle);
+    vTaskSuspend(task2_handle);
+
+    eTaskState state1 = eTaskGetState(task1_handle);
+    eTaskState state2 = eTaskGetState(task2_handle);
+
+    printf("Task 1 state after suspend: %d\n", state1);
+    printf("Task 2 state after suspend: %d\n", state2);
+    printf("Deadlock test complete\n");
+
+    /* Delete the deadlocked tasks. */
+    vTaskDelete(task1_handle);
+    vTaskDelete(task2_handle);
+
+    vTaskDelete(NULL);
 }
 
 int main(void)
 {
     stdio_init_all();
 
-    hard_assert(cyw43_arch_init() == PICO_OK);
-
-    on = false;
-    counter = 0;
-
-    semaphore = xSemaphoreCreateCounting(1, 1);
-
-    TaskHandle_t main_task_handle;
-    TaskHandle_t side_task_handle;
+    lock1 = xSemaphoreCreateMutex();
+    lock2 = xSemaphoreCreateMutex();
 
     xTaskCreate(
-        main_thread,
-        "MainThread",
-        MAIN_TASK_STACK_SIZE,
+        task1,
+        "Task1",
+        TASK_STACK_SIZE,
         NULL,
-        MAIN_TASK_PRIORITY,
-        &main_task_handle
+        TASK_PRIORITY,
+        &task1_handle
     );
 
     xTaskCreate(
-        side_thread,
-        "SideThread",
-        SIDE_TASK_STACK_SIZE,
+        task2,
+        "Task2",
+        TASK_STACK_SIZE,
         NULL,
-        SIDE_TASK_PRIORITY,
-        &side_task_handle
+        TASK_PRIORITY,
+        &task2_handle
+    );
+
+    xTaskCreate(
+        deadlock_test,
+        "DeadlockTest",
+        TASK_STACK_SIZE,
+        NULL,
+        TASK_PRIORITY + 1,
+        NULL
     );
 
     vTaskStartScheduler();
